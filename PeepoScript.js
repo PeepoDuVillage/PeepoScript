@@ -5,8 +5,8 @@
 // @description  Blacklist et Favori combinés pour Village.cx
 // @author       Peepo
 // @match        https://village.cx/*
-// @updateURL    https://raw.githubusercontent.com/PeepoDuVillage/Blacklist-Village/main/PeepoScript.user.js
-// @downloadURL  https://raw.githubusercontent.com/PeepoDuVillage/Blacklist-Village/main/PeepoScript.user.js
+// @updateURL    https://raw.githubusercontent.com/PeepoDuVillage/PeepoScript/refs/heads/master/PeepoScript.js
+// @downloadURL  https://raw.githubusercontent.com/PeepoDuVillage/PeepoScript/refs/heads/master/PeepoScript.js
 // @grant        none
 // ==/UserScript==
 
