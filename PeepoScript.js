@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PeepoScript
 // @namespace    Peepo
-// @version      1.63
+// @version      1.65
 // @description  Blacklist et Favori combinés pour Village.cx
 // @author       Peepo
 // @match        https://village.cx/*
