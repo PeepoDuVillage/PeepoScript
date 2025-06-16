@@ -404,7 +404,7 @@
         document.body.appendChild(panel);
     }
     function updateBlacklistPanelContent(panel) {
-        panel.innerHTML = `
+        setSafeInnerHTML(panel, `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             <strong>Blacklist</strong>
             <div>
@@ -412,7 +412,7 @@
                 <button id="blacklist-import-btn" style="background: none; border: none; color: #2196F3; cursor: pointer;">⤒ Importer</button>
             </div>
         </div>
-    `;
+    `);
         if (blacklist.length === 0) {
             panel.innerHTML += '<p><em>Aucun utilisateur blacklisté.</em></p>';
         } else {
@@ -651,7 +651,7 @@
         document.body.appendChild(panel);
     }
     function updateHighlightListPanelContent(panel) {
-        panel.innerHTML = '<strong>Membres en évidence :</strong><br/>';
+        setSafeInnerHTML(panel, '<strong>Membres en évidence :</strong><br/>');
         if (highlightList.length === 0) {
             panel.innerHTML += '<p><em>Aucun membre en évidence.</em></p>';
         } else {
@@ -806,6 +806,15 @@
         }
     }
 
+    // --- Utilitaire pour vérifier que l'URL commence par https:// ---
+    function isHttpsUrl(url) {
+        try {
+            return (new URL(url)).protocol === "https:";
+        } catch (e) {
+            return false;
+        }
+    }
+
     // --- Intégration Vocaroo ---
     function integrateVocaroo(msg) {
         // Ne traite qu'une fois chaque message
@@ -815,10 +824,13 @@
             if (link.classList.contains('vocaroo-embed')) return;
             try {
                 const url = new URL(link.href);
-                // Vérification stricte du nom de domaine
+                // Vérification stricte du nom de domaine ET du protocole https
                 if (
-                    (url.hostname === "vocaroo.com" || url.hostname === "www.vocaroo.com") ||
-                    (url.hostname === "voca.ro" || url.hostname === "www.voca.ro")
+                    url.protocol === "https:" &&
+                    (
+                        (url.hostname === "vocaroo.com" || url.hostname === "www.vocaroo.com") ||
+                        (url.hostname === "voca.ro" || url.hostname === "www.voca.ro")
+                    )
                 ) {
                     const match = url.pathname.match(/^\/([a-zA-Z0-9]+)$/);
                     if (match) {
@@ -847,7 +859,10 @@
             if (link.classList.contains('risibank-embed')) return;
             try {
                 const url = new URL(link.href);
-                if (url.hostname === "risibank.fr") {
+                if (
+                    url.protocol === "https:" &&
+                    url.hostname === "risibank.fr"
+                ) {
                     // Accepte tout lien risibank.fr qui finit par une extension d'image
                     if (url.pathname.match(/\.(png|jpg|jpeg|gif|webp)$/i)) {
                         const img = document.createElement('img');
@@ -869,7 +884,10 @@
             if (link.classList.contains('noelshack-embed')) return;
             try {
                 const url = new URL(link.href);
-                if (url.hostname === "image.noelshack.com") {
+                if (
+                    url.protocol === "https:" &&
+                    url.hostname === "image.noelshack.com"
+                ) {
                     // Accepte tout lien image.noelshack.com qui finit par une extension d'image
                     if (url.pathname.match(/\.(png|jpg|jpeg|gif|webp)$/i)) {
                         const img = document.createElement('img');
@@ -904,3 +922,254 @@
                 });
             }
         })();
+
+// Ajoute DOMPurify si absent (CDN)
+if (typeof DOMPurify === 'undefined') {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js';
+    script.async = false;
+    document.head.appendChild(script);
+}
+
+// --- Utilitaire pour insérer du HTML nettoyé ---
+function setSafeInnerHTML(element, html) {
+    if (window.DOMPurify) {
+        element.innerHTML = DOMPurify.sanitize(html);
+    } else {
+        // Fallback si DOMPurify n'est pas encore chargé
+        element.innerHTML = html;
+    }
+}
+
+// --- Exemple d'intégration dans updateBlacklistPanelContent ---
+function updateBlacklistPanelContent(panel) {
+    setSafeInnerHTML(panel, `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <strong>Blacklist</strong>
+            <div>
+                <button id="blacklist-export-btn" style="background: none; border: none; color: #4CAF50; cursor: pointer; margin-right: 5px;">⤓ Exporter</button>
+                <button id="blacklist-import-btn" style="background: none; border: none; color: #2196F3; cursor: pointer;">⤒ Importer</button>
+            </div>
+        </div>
+    `);
+    if (blacklist.length === 0) {
+        panel.innerHTML += '<p><em>Aucun utilisateur blacklisté.</em></p>';
+    } else {
+        const list = document.createElement('div');
+        list.style.marginTop = '10px';
+        blacklist.slice().sort().forEach(name => {
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.justifyContent = 'space-between';
+            row.style.alignItems = 'center';
+            row.style.padding = '8px 10px';
+            row.style.margin = '5px 0';
+            row.style.backgroundColor = '#1a1a1a';
+            row.style.borderRadius = '8px';
+            row.style.borderLeft = '3px solid #ff6b6b';
+            const span = document.createElement('span');
+            span.textContent = name;
+            span.style.fontSize = '14px';
+            span.style.color = '#ffffff';
+            const del = document.createElement('button');
+            del.innerHTML = '❌';
+            del.style.background = 'none';
+            del.style.color = '#ff6b6b';
+            del.style.border = 'none';
+            del.style.cursor = 'pointer';
+            del.style.fontSize = '16px';
+            del.onclick = () => removeFromBlacklist(name);
+            row.appendChild(span);
+            row.appendChild(del);
+            list.appendChild(row);
+        });
+        panel.appendChild(list);
+    }
+    // Ajout manuel
+    const addForm = document.createElement('div');
+    addForm.style.marginTop = '15px';
+    addForm.innerHTML = `
+        <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+            <input type="text" id="blacklist-add-input" placeholder="Nom à blacklister"
+                   style="padding: 5px; border-radius: 4px; border: 1px solid #444; background: #222; color: white; flex-grow: 1;">
+            <button id="blacklist-add-btn" style="padding: 2px 6px; font-size:12px; background: #4CAF50; color: white; border: none; border-radius: 4px;">Ajouter</button>
+        </div>
+    `;
+    panel.appendChild(addForm);
+
+    // Option confirmation
+    const disableConfirmationLabel = document.createElement('div');
+    disableConfirmationLabel.style.marginTop = '10px';
+    disableConfirmationLabel.innerHTML = `
+        <label style="display: flex; align-items: center; gap: 5px; color: white; margin-bottom: 10px;">
+            <input type="checkbox" id="disable-confirmation" ${disableConfirmation ? 'checked' : ''}>
+            <span>Désactiver la confirmation</span>
+        </label>
+    `;
+    panel.appendChild(disableConfirmationLabel);
+
+    // --- Ajout de la case à cocher pour déplacer le bouton ---
+    const moveBtnCheckboxDiv = document.createElement('div');
+    moveBtnCheckboxDiv.style.marginTop = '10px';
+    moveBtnCheckboxDiv.innerHTML = `
+        <label style="display: flex; align-items: center; gap: 5px; color: white;">
+            <input type="checkbox" id="move-blacklist-btn-checkbox">
+            <span>Mode modérateur</span>
+        </label>
+    `;
+    panel.appendChild(moveBtnCheckboxDiv);
+
+    // Charger l'état sauvegardé du mode modérateur
+    let moderatorMode = localStorage.getItem('moderatorModeVillageCX') === '1';
+    moveBtnCheckboxDiv.querySelector('#move-blacklist-btn-checkbox').checked = moderatorMode;
+
+    // Appliquer la position du bouton selon le mode modérateur (une seule fois et de façon fiable)
+    const blBtn = document.getElementById('blacklist-manage-btn');
+    if (blBtn) {
+        // On stocke la position attendue dans le dataset pour éviter tout recalcul/décalage multiple
+        if (moderatorMode) {
+            if (blBtn.dataset.moderatorMoved !== "true" || blBtn.style.left !== "40px") {
+                blBtn.style.left = "40px";
+                blBtn.dataset.moderatorMoved = "true";
+            }
+        } else {
+            if (blBtn.dataset.moderatorMoved !== "false" || blBtn.style.left !== "10px") {
+                blBtn.style.left = "10px";
+                blBtn.dataset.moderatorMoved = "false";
+            }
+        }
+    }
+
+    moveBtnCheckboxDiv.querySelector('#move-blacklist-btn-checkbox').onchange = (e) => {
+        moderatorMode = e.target.checked;
+        localStorage.setItem('moderatorModeVillageCX', moderatorMode ? '1' : '0');
+        const btn = document.getElementById('blacklist-manage-btn');
+        if (btn) {
+            if (moderatorMode) {
+                btn.style.left = "40px";
+                btn.dataset.moderatorMoved = "true";
+            } else {
+                btn.style.left = "10px";
+                btn.dataset.moderatorMoved = "false";
+            }
+        }
+    };
+
+    // --- Ajout de la case à cocher pour changer l'icône du bouton blacklist ---
+    const iconCheckboxDiv = document.createElement('div');
+    iconCheckboxDiv.style.marginTop = '10px';
+    iconCheckboxDiv.innerHTML = `
+        <label style="display: flex; align-items: center; gap: 5px; color: white;">
+            <input type="checkbox" id="blacklist-icon-checkbox">
+            <span>Icône blacklist : ❌ au lieu de 🚫</span>
+        </label>
+    `;
+    panel.appendChild(iconCheckboxDiv);
+
+    // Récupérer l'état de l'icône depuis localStorage
+    let useCrossIcon = localStorage.getItem('blacklistUseCrossIcon') === '1';
+    iconCheckboxDiv.querySelector('#blacklist-icon-checkbox').checked = useCrossIcon;
+
+    // Gestion du changement d'icône
+    iconCheckboxDiv.querySelector('#blacklist-icon-checkbox').onchange = (e) => {
+        useCrossIcon = e.target.checked;
+        localStorage.setItem('blacklistUseCrossIcon', useCrossIcon ? '1' : '0');
+        refreshAll(true);
+    };
+
+    addForm.querySelector('#blacklist-add-btn').onclick = () => {
+        const input = addForm.querySelector('#blacklist-add-input');
+        const name = input.value.trim();
+        if (name) {
+            addToBlacklist(name);
+            input.value = '';
+        }
+    };
+    addForm.querySelector('#blacklist-add-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            const input = addForm.querySelector('#blacklist-add-input');
+            const name = input.value.trim();
+            if (name) {
+                addToBlacklist(name);
+                input.value = '';
+            }
+        }
+    });
+    panel.querySelector('#disable-confirmation').onchange = (e) => {
+        disableConfirmation = e.target.checked;
+        saveConfirmationSetting();
+    };
+    panel.querySelector('#blacklist-export-btn').onclick = exportBlacklist;
+    panel.querySelector('#blacklist-import-btn').onclick = importBlacklist;
+}
+// --- Exemple d'intégration dans updateHighlightListPanelContent ---
+function updateHighlightListPanelContent(panel) {
+    setSafeInnerHTML(panel, '<strong>Membres en évidence :</strong><br/>');
+    if (highlightList.length === 0) {
+        panel.innerHTML += '<p><em>Aucun membre en évidence.</em></p>';
+    } else {
+        const list = document.createElement('div');
+        list.style.marginTop = '10px';
+        highlightList.forEach(name => {
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.justifyContent = 'space-between';
+            row.style.alignItems = 'center';
+            row.style.padding = '10px';
+            row.style.margin = '5px 0';
+            row.style.backgroundColor = '#1a1a1a';
+            row.style.borderRadius = '8px';
+            row.style.borderLeft = '3px solid #FFD700';
+            const span = document.createElement('span');
+            span.textContent = name;
+            span.style.fontSize = '14px';
+            span.style.color = '#ffffff';
+            const del = document.createElement('button');
+            del.innerHTML = '❌';
+            del.style.background = 'none';
+            del.style.color = '#FFD700';
+            del.style.border = 'none';
+            del.style.cursor = 'pointer';
+            del.style.fontSize = '16px';
+            del.onclick = () => removeFromHighlightList(name);
+            row.appendChild(span);
+            row.appendChild(del);
+            list.appendChild(row);
+        });
+        panel.appendChild(list);
+    }
+}
+function updateHighlightListPanel() {
+    const panel = document.getElementById('highlight-panel');
+    if (panel) updateHighlightListPanelContent(panel);
+}
+
+// Utilitaire pour obtenir un paramètre d'URL (si besoin pour une redirection)
+function getParameterByName(name, url = window.location.href) {
+    name = name.replace(/[[]]/g, '\\$&');
+    const regex = new RegExp('[?&]' + name + '(=([^&#]*)|&|#|$)');
+    const results = regex.exec(url);
+    if (!results) return null;
+    if (!results[2]) return '';
+    return decodeURIComponent(results[2].replace(/\+/g, ' '));
+}
+
+// Exemple d'utilisation sécurisée pour une redirection
+function safeRedirect() {
+    const redirectUrl = getParameterByName('redirect');
+    if (!redirectUrl) return; // Pas de redirection demandée
+
+    try {
+        // On autorise uniquement les URLs internes (même origine)
+        const url = new URL(redirectUrl, window.location.origin);
+        if (url.origin === window.location.origin) {
+            window.location.href = url.href;
+        } else {
+            // Redirection externe refusée, on reste sur la page ou on redirige vers la racine
+            window.location.href = '/';
+        }
+    } catch (e) {
+        // URL invalide, on reste sur la page ou on redirige vers la racine
+        window.location.href = '/';
+    }
+}
