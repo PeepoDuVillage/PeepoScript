@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         PeepoScript
 // @namespace    Peepo
-// @version      1.62
+// @version      1.63
 // @description  Blacklist et Favori combinés pour Village.cx
 // @author       Peepo
 // @match        https://village.cx/*
-// @updateURL    https://raw.githubusercontent.com/PeepoDuVillage/PeepoScript/refs/heads/master/PeepoScript.js
-// @downloadURL  https://raw.githubusercontent.com/PeepoDuVillage/PeepoScript/refs/heads/master/PeepoScript.js
+// @updateURL    https://raw.githubusercontent.com/PeepoDuVillage/PeepoScript/master/PeepoScript.js
+// @downloadURL  https://raw.githubusercontent.com/PeepoDuVillage/PeepoScript/master/PeepoScript.js
 // @grant        none
 // ==/UserScript==
 
@@ -33,16 +33,21 @@
 
     // --- Ajout/Suppression Blacklist/Favori ---
     function addToBlacklist(pseudo) {
-        const name = pseudo.toLowerCase();
-        if (!blacklist.includes(name)) {
-            if (!disableConfirmation && !confirm(`Voulez-vous vraiment blacklister ${pseudo} ?`)) return false;
-            blacklist.push(name);
+        const sanitizedPseudo = validateAndSanitizeUsername(pseudo);
+        if (!sanitizedPseudo) {
+            showNotification("Nom d'utilisateur invalide ou dangereux.", true);
+            return false;
+        }
+        
+        if (!blacklist.includes(sanitizedPseudo)) {
+            if (!disableConfirmation && !confirm(`Voulez-vous vraiment blacklister ${sanitizedPseudo} ?`)) return false;
+            blacklist.push(sanitizedPseudo);
             saveBlacklist();
             refreshAll();
-            showNotification(`"${pseudo}" a été ajouté à la blacklist.`);
+            showNotification(`"${sanitizedPseudo}" a été ajouté à la blacklist.`);
             return true;
         } else {
-            showNotification(`"${pseudo}" est déjà dans la blacklist.`, true);
+            showNotification(`"${sanitizedPseudo}" est déjà dans la blacklist.`, true);
             return false;
         }
     }
@@ -53,12 +58,17 @@
         setTimeout(() => refreshAll(true), 0); // Rafraîchit immédiatement après la suppression
     }
     function addToHighlightList(pseudo) {
-        const name = pseudo.toLowerCase();
-        if (!highlightList.includes(name)) {
-            highlightList.push(name);
+        const sanitizedPseudo = validateAndSanitizeUsername(pseudo);
+        if (!sanitizedPseudo) {
+            showNotification("Nom d'utilisateur invalide ou dangereux.", true);
+            return false;
+        }
+        
+        if (!highlightList.includes(sanitizedPseudo)) {
+            highlightList.push(sanitizedPseudo);
             saveHighlightList();
             refreshAll();
-            showNotification(`"${pseudo}" a été ajouté aux favoris.`);
+            showNotification(`"${sanitizedPseudo}" a été ajouté aux favoris.`);
         }
     }
     function removeFromHighlightList(name) {
@@ -594,18 +604,19 @@
                     try {
                         const importedList = JSON.parse(event.target.result);
                         if (Array.isArray(importedList)) {
-                            const newNames = importedList
-                                .map(name => typeof name === 'string' ? name.toLowerCase() : '')
-                                .filter(name => !blacklist.includes(name) && name.trim() !== '');
-                            if (newNames.length > 0) {
-                                if (confirm(`Voulez-vous ajouter ${newNames.length} noms à votre blacklist actuelle ?`)) {
-                                    blacklist = [...blacklist, ...newNames];
+                            const validNames = importedList
+                                .map(name => validateAndSanitizeUsername(name))
+                                .filter(name => name && !blacklist.includes(name));
+                        
+                            if (validNames.length > 0) {
+                                if (confirm(`Voulez-vous ajouter ${validNames.length} noms valides à votre blacklist actuelle ?`)) {
+                                    blacklist = [...blacklist, ...validNames];
                                     saveBlacklist();
                                     refreshAll();
-                                    showNotification(`Ajouté ${newNames.length} noms à la blacklist.`);
+                                    showNotification(`Ajouté ${validNames.length} noms à la blacklist.`);
                                 }
                             } else {
-                                showNotification("Aucun nouveau nom à ajouter ou tous les noms sont déjà dans la blacklist.");
+                                showNotification("Aucun nom valide à ajouter ou tous les noms sont déjà dans la blacklist.");
                             }
                         } else {
                             showNotification("Format de fichier invalide. Veuillez fournir un tableau JSON.", true);
@@ -1172,4 +1183,32 @@ function safeRedirect() {
         // URL invalide, on reste sur la page ou on redirige vers la racine
         window.location.href = '/';
     }
+}
+
+// --- Utilitaire pour valider et nettoyer les entrées utilisateur ---
+function validateAndSanitizeUsername(input) {
+    if (typeof input !== 'string') return null;
+    
+    // Nettoie les espaces en début/fin
+    input = input.trim();
+    
+    // Vérifie que ce n'est pas vide
+    if (input.length === 0) return null;
+    
+    // Vérifie la longueur (max 50 caractères par exemple)
+    if (input.length > 50) return null;
+    
+    // Autorise uniquement les caractères alphanumériques, tirets, underscores et espaces
+    // Refuse les caractères HTML/JS dangereux
+    const allowedPattern = /^[a-zA-Z0-9\s_-]+$/;
+    if (!allowedPattern.test(input)) return null;
+    
+    // Refuse les mots dangereux (optionnel)
+    const dangerousKeywords = ['<script', '</script', 'javascript:', 'data:', 'vbscript:', 'onload', 'onerror'];
+    const lowerInput = input.toLowerCase();
+    for (const keyword of dangerousKeywords) {
+        if (lowerInput.includes(keyword)) return null;
+    }
+    
+    return input.toLowerCase(); // Retourne en minuscules pour cohérence
 }
