@@ -1,8 +1,9 @@
 // ==UserScript==
 // @name         PeepoScript
 // @namespace    Peepo
-// @version      1.65
-// @description  Blacklist et Favori combinés pour Village.cx
+// @version      1.7
+// @description  Blacklist et Favori combinés pour Village.cx version Alpha
+// @icon         https://village.cx/favicon.ico
 // @author       Peepo
 // @match        https://village.cx/*
 // @updateURL    https://raw.githubusercontent.com/PeepoDuVillage/PeepoScript/master/PeepoScript.js
@@ -38,7 +39,7 @@
             showNotification("Nom d'utilisateur invalide ou dangereux.", true);
             return false;
         }
-        
+
         if (!blacklist.includes(sanitizedPseudo)) {
             if (!disableConfirmation && !confirm(`Voulez-vous vraiment blacklister ${sanitizedPseudo} ?`)) return false;
             blacklist.push(sanitizedPseudo);
@@ -63,7 +64,7 @@
             showNotification("Nom d'utilisateur invalide ou dangereux.", true);
             return false;
         }
-        
+
         if (!highlightList.includes(sanitizedPseudo)) {
             highlightList.push(sanitizedPseudo);
             saveHighlightList();
@@ -288,9 +289,9 @@
         editQuotes();
         hideTopics();
         highlightTopics();
-        hideBlacklistedTypingUsers(); // <-- Ajoute cette ligne
         updateBlacklistPanel();
         updateHighlightListPanel();
+        // applyTypingListeners(); // Ajouter cette ligne
         startObserver();
     }
 
@@ -351,7 +352,7 @@
                 oledBtn.id = 'oled-theme-btn';
                 oledBtn.style.position = 'fixed';
                 oledBtn.style.top = '5px';
-                oledBtn.style.right = '120px'; // À gauche du bouton Favoris
+                oledBtn.style.right = '150px'; // À gauche du bouton Favoris
                 oledBtn.style.zIndex = '10000';
                 oledBtn.style.fontSize = '14px';
                 oledBtn.style.padding = '6px 12px';
@@ -370,7 +371,7 @@
                 highlightBtn.id = 'highlight-manage-btn';
                 highlightBtn.style.position = 'fixed';
                 highlightBtn.style.top = '5px';
-                highlightBtn.style.right = '10px';
+                highlightBtn.style.right = '50px';
                 highlightBtn.style.zIndex = '10000';
                 highlightBtn.style.fontSize = '14px';
                 highlightBtn.style.padding = '6px 12px';
@@ -607,7 +608,7 @@
                             const validNames = importedList
                                 .map(name => validateAndSanitizeUsername(name))
                                 .filter(name => name && !blacklist.includes(name));
-                        
+
                             if (validNames.length > 0) {
                                 if (confirm(`Voulez-vous ajouter ${validNames.length} noms valides à votre blacklist actuelle ?`)) {
                                     blacklist = [...blacklist, ...validNames];
@@ -702,7 +703,87 @@
         if (panel) updateHighlightListPanelContent(panel);
     }
 
-    // --- Initialisation ---
+    // --- Silent Typing Feature (WebSocket only) ---
+    let silentTypingEnabled = localStorage.getItem('silentTypingVillageCX') === '1';
+    let wsHookStopper = null;
+
+    function toggleSilentTyping() {
+        silentTypingEnabled = !silentTypingEnabled;
+        localStorage.setItem('silentTypingVillageCX', silentTypingEnabled ? '1' : '0');
+        updateSilentTypingButton();
+        if (silentTypingEnabled) {
+            enableSilentTypingWebSocket();
+            showNotification("Mode frappe silencieuse activé");
+        } else {
+            disableSilentTypingWebSocket();
+            showNotification("Mode frappe silencieuse désactivé");
+        }
+    }
+
+    function createSilentTypingButton() {
+        if (document.getElementById('silent-typing-btn')) return;
+        const btn = document.createElement('button');
+        btn.textContent = silentTypingEnabled ? '🔇 Silent Typing Activé' : '🔊 Silent Typing Désactivé';
+        btn.id = 'silent-typing-btn';
+        btn.style.position = 'fixed';
+        btn.style.top = '5px';
+        btn.style.right = '250px';
+        btn.style.zIndex = '10000';
+        btn.style.fontSize = '14px';
+        btn.style.padding = '6px 12px';
+        btn.style.background = silentTypingEnabled ? '#555' : '#222';
+        btn.style.color = 'white';
+        btn.style.border = '1px solid #555';
+        btn.style.borderRadius = '6px';
+        btn.style.cursor = 'pointer';
+        btn.onclick = toggleSilentTyping;
+        document.body.appendChild(btn);
+    }
+
+    function updateSilentTypingButton() {
+        const btn = document.getElementById('silent-typing-btn');
+        if (btn) {
+            btn.textContent = silentTypingEnabled ? '🔇 Silent Typing Activé' : '🔊 Silent Typing Désactivé';
+            btn.style.background = silentTypingEnabled ? '#555' : '#222';
+        }
+    }
+
+    // --- WebSocket hook pour silent typing ---
+    function enableSilentTypingWebSocket() {
+        if (wsHookStopper) return; // déjà hooké
+
+        function hookMethod(obj, method, hookFn) {
+            const realMethod = obj[method];
+            function stopHook() {
+                obj[method] = realMethod;
+            }
+            function hook(...args) {
+                return hookFn({ stopHook, method: realMethod }, this, args);
+            }
+            obj[method] = hook;
+            return stopHook;
+        }
+
+        wsHookStopper = hookMethod(WebSocket.prototype, "send", (ctx, obj, args) => {
+            const msg = args[0];
+            try {
+                const data = JSON.parse(msg);
+                if (data && data.type === "typing") {
+                    return; // bloque l'envoi du message de frappe
+                }
+            } catch (e) {}
+            return ctx.method.apply(obj, args);
+        });
+    }
+
+    function disableSilentTypingWebSocket() {
+        if (wsHookStopper) {
+            wsHookStopper();
+            wsHookStopper = null;
+        }
+    }
+
+    // --- Intégration dans l'initialisation ---
     function initialize() {
         // OLED mode: restore state from localStorage
         if (localStorage.getItem('oledThemeVillageCX') === '1') {
@@ -752,7 +833,9 @@
         }
         refreshAll();
         createManageButton();
+        createSilentTypingButton();
         startObserver();
+        if (silentTypingEnabled) enableSilentTypingWebSocket();
     }
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initialize);
@@ -1188,27 +1271,27 @@ function safeRedirect() {
 // --- Utilitaire pour valider et nettoyer les entrées utilisateur ---
 function validateAndSanitizeUsername(input) {
     if (typeof input !== 'string') return null;
-    
+
     // Nettoie les espaces en début/fin
     input = input.trim();
-    
+
     // Vérifie que ce n'est pas vide
     if (input.length === 0) return null;
-    
+
     // Vérifie la longueur (max 50 caractères par exemple)
     if (input.length > 50) return null;
-    
+
     // Autorise uniquement les caractères alphanumériques, tirets, underscores et espaces
     // Refuse les caractères HTML/JS dangereux
     const allowedPattern = /^[a-zA-Z0-9\s_-]+$/;
     if (!allowedPattern.test(input)) return null;
-    
+
     // Refuse les mots dangereux (optionnel)
     const dangerousKeywords = ['<script', '</script', 'javascript:', 'data:', 'vbscript:', 'onload', 'onerror'];
     const lowerInput = input.toLowerCase();
     for (const keyword of dangerousKeywords) {
         if (lowerInput.includes(keyword)) return null;
     }
-    
+
     return input.toLowerCase(); // Retourne en minuscules pour cohérence
 }
