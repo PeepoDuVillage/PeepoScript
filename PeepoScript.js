@@ -14,6 +14,15 @@
 (function () {
     'use strict';
 
+    // Cache des sélecteurs fréquemment utilisés
+    const domCache = {
+        optionsPanel: null,
+        blacklistBtn: null,
+        messageSelectors: '.message',
+        pseudoSelectors: '.message-user span.font-medium',
+        topicSelectors: 'a.row-center.py-1.w-full'
+    };
+
     // --- Stockage ---
     let blacklist = JSON.parse(localStorage.getItem('blacklistVillageCX')) || [];
     blacklist = blacklist.map(name => name.toLowerCase());
@@ -21,6 +30,9 @@
     highlightList = highlightList.map(name => name.toLowerCase());
     let disableConfirmation = JSON.parse(localStorage.getItem('disableConfirmation')) || false;
 
+    // --- Stockage Silent Typing ---
+    let silentTypingEnabled = localStorage.getItem('silentTypingEnabled') === 'true';
+    
     // --- Sauvegarde ---
     function saveBlacklist() {
         localStorage.setItem('blacklistVillageCX', JSON.stringify(blacklist));
@@ -166,17 +178,25 @@
 
     // --- Masquage des messages blacklistés ---
     function hideMessages() {
-        document.querySelectorAll('.message').forEach(msg => {
-            const pseudoElement = msg.querySelector('.message-user span.font-medium');
-            if (pseudoElement) {
-                const pseudo = pseudoElement.innerText.trim();
-                if (blacklist.includes(pseudo.toLowerCase())) {
-                    msg.style.display = 'none';
-                } else {
-                    msg.style.display = '';
-                    insertButtons(msg, pseudo);
+        document.querySelectorAll(domCache.messageSelectors).forEach(msg => {
+            const pseudoElement = msg.querySelector(domCache.pseudoSelectors);
+            if (!pseudoElement) return;
+
+            const pseudo = pseudoElement.innerText.trim();
+            const pseudoLower = pseudo.toLowerCase();
+            
+            // Toujours insérer les boutons
+            insertButtons(msg, pseudo);
+            
+            if (blacklist.includes(pseudoLower)) {
+                msg.style.display = 'none';
+            } else {
+                msg.style.display = '';
+                if (msg.querySelectorAll('a[href*="vocaroo.com"], a[href*="voca.ro"]').length) {
                     integrateVocaroo(msg);
-                    integrateImages(msg); // <-- Ajoute cet appel ici
+                }
+                if (msg.querySelectorAll('a[href*="risibank.fr"], a[href*="noelshack.com"]').length) {
+                    integrateImages(msg);
                 }
             }
         });
@@ -198,18 +218,12 @@
 
     // --- Masquage des topics blacklistés ---
     function hideTopics() {
-        document.querySelectorAll('a.row-center.py-1.w-full').forEach(topic => {
+        document.querySelectorAll(domCache.topicSelectors).forEach(topic => {
             try {
                 const pseudoElement = topic.querySelector('.row-center.text-sm span');
-                if (pseudoElement) {
-                    const pseudo = pseudoElement.textContent.trim().toLowerCase();
-                    if (blacklist.includes(pseudo)) {
-                        const easeLinear = topic.closest('div[class*="ease-linear"]');
-                        if (easeLinear) {
-                            const parentDiv = easeLinear.parentElement;
-                            if (parentDiv) parentDiv.style.display = 'none';
-                        }
-                    }
+                if (pseudoElement && blacklist.includes(pseudoElement.textContent.trim().toLowerCase())) {
+                    const parentDiv = topic.closest('div[class*="ease-linear"]')?.parentElement;
+                    if (parentDiv) parentDiv.style.display = 'none';
                 }
             } catch (e) {}
         });
@@ -264,35 +278,66 @@
         });
     }
 
-    // --- Observer pour les nouveaux messages ---
+    // Debounce function
+    function debounce(func, wait) {
+        let timeout;
+        return function (...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+
+    // Observer optimisé avec debounce
     let observer;
     function startObserver() {
         if (observer) observer.disconnect();
-        observer = new MutationObserver(() => refreshAll());
-        observer.observe(document.body, { childList: true, subtree: true });
+        const debouncedRefresh = debounce(() => refreshAll(), 100);
+        observer = new MutationObserver(debouncedRefresh);
+        observer.observe(document.body, { 
+            childList: true, 
+            subtree: true,
+            attributes: false,
+            characterData: false
+        });
     }
+
     function stopObserver() {
         if (observer) observer.disconnect();
     }
 
     // --- Rafraîchissement complet ---
     function refreshAll(force = false) {
-        stopObserver();
-        if (!force && document.activeElement && (
-            document.activeElement.closest('#blacklist-panel') ||
-            document.activeElement.closest('#highlight-panel')
-        )) {
-            startObserver();
+        if (!force && document.activeElement?.closest('#options-panel')) {
             return;
         }
-        hideMessages();
-        editQuotes();
-        hideTopics();
-        highlightTopics();
-        updateBlacklistPanel();
-        updateHighlightListPanel();
-        // applyTypingListeners(); // Ajouter cette ligne
-        startObserver();
+
+        stopObserver();
+        
+        const start = performance.now();
+        
+        requestAnimationFrame(() => {
+            hideMessages();
+            editQuotes();
+            hideTopics();
+            highlightTopics();
+            
+            if (domCache.optionsPanel) {
+                updateOptionsPanel();
+            }
+            if (document.getElementById('highlight-panel')) {
+                updateHighlightListPanel();
+            }
+
+            startObserver();
+            
+            console.debug('Refresh completed in', performance.now() - start, 'ms');
+        });
+    }
+
+    // Mise à jour du cache DOM
+    function updateDOMCache() {
+        domCache.optionsPanel = document.getElementById('options-panel');
+        domCache.blacklistBtn = document.getElementById('options-btn');
     }
 
     // --- Notifications ---
@@ -321,14 +366,15 @@
     // --- Panneau de gestion Blacklist ---
     function createManageButton() {
         try {
-            // Blacklist
-            if (!document.getElementById('blacklist-manage-btn')) {
+            // Options button seulement
+            if (!document.getElementById('options-btn')) {
+                const savedLeft = parseInt(localStorage.getItem('blacklistBtnLeftVillageCX') || '10', 10);
                 const btn = document.createElement('button');
-                btn.textContent = '⚙️ Blacklist';
-                btn.id = 'blacklist-manage-btn';
+                btn.textContent = '⚙️ Options';
+                btn.id = 'options-btn';
                 btn.style.position = 'fixed';
                 btn.style.top = '10px';
-                btn.style.left = '10px';
+                btn.style.left = savedLeft + 'px';
                 btn.style.zIndex = '10000';
                 btn.style.fontSize = '14px';
                 btn.style.padding = '6px 12px';
@@ -337,85 +383,146 @@
                 btn.style.border = '1px solid #555';
                 btn.style.borderRadius = '6px';
                 btn.style.cursor = 'pointer';
-                btn.onclick = toggleBlacklistPanel;
+                btn.onclick = toggleOptionsPanel;
                 document.body.appendChild(btn);
-
-                // --- Appliquer le mode modérateur dès la création du bouton ---
-                if (localStorage.getItem('moderatorModeVillageCX') === '1') {
-                    btn.style.left = (parseInt(btn.style.left || '10', 10) + 30) + 'px';
-                }
-            }
-            // OLED Theme
-            if (!document.getElementById('oled-theme-btn')) {
-                const oledBtn = document.createElement('button');
-                oledBtn.textContent = '🖤 OLED';
-                oledBtn.id = 'oled-theme-btn';
-                oledBtn.style.position = 'fixed';
-                oledBtn.style.top = '5px';
-                oledBtn.style.right = '150px'; // À gauche du bouton Favoris
-                oledBtn.style.zIndex = '10000';
-                oledBtn.style.fontSize = '14px';
-                oledBtn.style.padding = '6px 12px';
-                oledBtn.style.background = '#111';
-                oledBtn.style.color = 'white';
-                oledBtn.style.border = '1px solid #555';
-                oledBtn.style.borderRadius = '6px';
-                oledBtn.style.cursor = 'pointer';
-                oledBtn.onclick = toggleOLEDTheme;
-                document.body.appendChild(oledBtn);
-            }
-            // Favoris
-            if (!document.getElementById('highlight-manage-btn')) {
-                const highlightBtn = document.createElement('button');
-                highlightBtn.textContent = '⭐ Favoris';
-                highlightBtn.id = 'highlight-manage-btn';
-                highlightBtn.style.position = 'fixed';
-                highlightBtn.style.top = '5px';
-                highlightBtn.style.right = '50px';
-                highlightBtn.style.zIndex = '10000';
-                highlightBtn.style.fontSize = '14px';
-                highlightBtn.style.padding = '6px 12px';
-                highlightBtn.style.background = '#222';
-                highlightBtn.style.color = 'white';
-                highlightBtn.style.border = '1px solid #555';
-                highlightBtn.style.borderRadius = '6px';
-                highlightBtn.style.cursor = 'pointer';
-                highlightBtn.onclick = toggleHighlightListPanel;
-                document.body.appendChild(highlightBtn);
             }
         } catch (e) {}
     }
 
-    function toggleBlacklistPanel() {
-        const panel = document.getElementById('blacklist-panel');
+    function toggleOptionsPanel() {
+        const panel = document.getElementById('options-panel');
         if (panel) {
             panel.remove();
         } else {
-            showBlacklistPanel();
+            showOptionsPanel(); // Était showBlacklistPanel
         }
     }
-    function showBlacklistPanel() {
-        const btn = document.getElementById('blacklist-manage-btn');
-        const rect = btn.getBoundingClientRect();
+    function showOptionsPanel() {
         const panel = document.createElement('div');
-        panel.id = 'blacklist-panel';
+        panel.id = 'options-panel';
         panel.style.position = 'fixed';
-        panel.style.top = `${rect.bottom + window.scrollY}px`;
-        panel.style.left = `${rect.left + window.scrollX}px`;
+        panel.style.left = '50%';
+        panel.style.top = '50%';
+        panel.style.transform = 'translate(-50%, -50%)';
         panel.style.background = 'black';
         panel.style.color = 'white';
-        panel.style.padding = '16px';
-        panel.style.borderRadius = '8px';
+        panel.style.padding = '20px';
+        panel.style.borderRadius = '12px';
         panel.style.zIndex = '10001';
-        panel.style.maxHeight = '400px';
+        panel.style.maxHeight = '90vh';
         panel.style.overflowY = 'auto';
-        panel.style.width = '300px';
+        panel.style.width = '600px'; // Plus large par défaut
+        panel.style.minWidth = '400px';
+        panel.style.minHeight = '300px';
+        panel.style.boxShadow = '0 4px 20px rgba(0,0,0,0.5)';
+        panel.style.resize = 'both'; // Permet le redimensionnement
         panel.classList.add('oled-panel');
-        updateBlacklistPanelContent(panel);
+
+        // Restaurer la position et taille sauvegardées
+        const savedPos = localStorage.getItem('optionsPanelPosition');
+        if (savedPos) {
+            const {x, y, width, height} = JSON.parse(savedPos);
+            panel.style.transform = 'none';
+            panel.style.left = x + 'px';
+            panel.style.top = y + 'px';
+            panel.style.width = width + 'px';
+            panel.style.height = height + 'px';
+        }
+
+        // Titre du panneau avec style pour drag
+        const title = document.createElement('div');
+        title.innerHTML = `
+            <div class="drag-handle" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; cursor: move;">
+                <h2 style="margin: 0; font-size: 20px; user-select: none;">Options</h2>
+                <button id="close-options-btn" style="background: none; border: none; color: #666; cursor: pointer; font-size: 20px;">×</button>
+            </div>
+        `;
+        panel.appendChild(title);
+
+        // Rendre le panneau déplaçable
+        const dragHandle = title.querySelector('.drag-handle');
+        let isDragging = false;
+        let currentX;
+        let currentY;
+        let initialX;
+        let initialY;
+
+        dragHandle.onmousedown = (e) => {
+            if (e.target.id === 'close-options-btn') return;
+            isDragging = true;
+            initialX = e.clientX - panel.offsetLeft;
+            initialY = e.clientY - panel.offsetTop;
+        };
+
+        document.onmousemove = (e) => {
+            if (!isDragging) return;
+            e.preventDefault();
+            currentX = e.clientX - initialX;
+            currentY = e.clientY - initialY;
+            panel.style.transform = 'none'; // Enlever transform initial
+            panel.style.left = currentX + 'px';
+            panel.style.top = currentY + 'px';
+        };
+
+        document.onmouseup = () => {
+            if (!isDragging) return;
+            isDragging = false;
+            // Sauvegarder la position et taille
+            localStorage.setItem('optionsPanelPosition', JSON.stringify({
+                x: panel.offsetLeft,
+                y: panel.offsetTop,
+                width: panel.offsetWidth,
+                height: panel.offsetHeight
+            }));
+        };
+
+        // Conteneur pour les sections
+        const content = document.createElement('div');
+        content.style.display = 'flex';
+        content.style.flexDirection = 'column';
+        content.style.gap = '20px';
+        
+        // Section Blacklist
+        const blacklistSection = document.createElement('div');
+        blacklistSection.innerHTML = `<h3 style="margin: 0 0 10px 0; color: #ff6b6b;">Gestion de la Blacklist</h3>`;
+        content.appendChild(blacklistSection);
+        
+        // Section Fonctionnalités 
+        const featuresSection = document.createElement('div');
+        featuresSection.innerHTML = `<h3 style="margin: 0 0 10px 0; color: #4CAF50;">Fonctionnalités</h3>`;
+        content.appendChild(featuresSection);
+
+        // Section Apparence
+        const appearanceSection = document.createElement('div');
+        appearanceSection.innerHTML = `<h3 style="margin: 0 0 10px 0; color: #4CAF50;">Apparence</h3>`;
+        content.appendChild(appearanceSection);
+
+        panel.appendChild(content);
         document.body.appendChild(panel);
+
+        // Gestionnaire de fermeture
+        document.getElementById('close-options-btn').onclick = () => panel.remove();
+
+        // Mise à jour du contenu
+        updateOptionsPanel(panel);
     }
-    function updateBlacklistPanelContent(panel) {
-        setSafeInnerHTML(panel, `
+
+    function updateOptionsPanel() {
+        const panel = document.getElementById('options-panel');
+        if (panel) {
+            const content = panel.querySelector('div[style*="flex-direction: column"]');
+            if (content) {
+                const [blacklistSection, featuresSection, appearanceSection] = content.children;
+                if (blacklistSection) updateBlacklistSection(blacklistSection);
+                if (featuresSection) updateFeaturesSection(featuresSection);
+                if (appearanceSection) updateAppearanceSection(appearanceSection);
+            }
+        }
+    }
+
+    function updateBlacklistSection(section) {
+        // Contenu existant de updateBlacklistPanelContent mais adapté
+        setSafeInnerHTML(section, `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             <strong>Blacklist</strong>
             <div>
@@ -425,7 +532,7 @@
         </div>
     `);
         if (blacklist.length === 0) {
-            panel.innerHTML += '<p><em>Aucun utilisateur blacklisté.</em></p>';
+            section.innerHTML += '<p><em>Aucun utilisateur blacklisté.</em></p>';
         } else {
             const list = document.createElement('div');
             list.style.marginTop = '10px';
@@ -455,7 +562,7 @@
                 row.appendChild(del);
                 list.appendChild(row);
             });
-            panel.appendChild(list);
+            section.appendChild(list);
         }
         // Ajout manuel
         const addForm = document.createElement('div');
@@ -467,7 +574,7 @@
                 <button id="blacklist-add-btn" style="padding: 2px 6px; font-size:12px; background: #4CAF50; color: white; border: none; border-radius: 4px;">Ajouter</button>
             </div>
         `;
-        panel.appendChild(addForm);
+        section.appendChild(addForm);
 
         // Option confirmation
         const disableConfirmationLabel = document.createElement('div');
@@ -478,54 +585,7 @@
                 <span>Désactiver la confirmation</span>
             </label>
         `;
-        panel.appendChild(disableConfirmationLabel);
-
-        // --- Ajout de la case à cocher pour déplacer le bouton ---
-        const moveBtnCheckboxDiv = document.createElement('div');
-        moveBtnCheckboxDiv.style.marginTop = '10px';
-        moveBtnCheckboxDiv.innerHTML = `
-            <label style="display: flex; align-items: center; gap: 5px; color: white;">
-                <input type="checkbox" id="move-blacklist-btn-checkbox">
-                <span>Mode modérateur</span>
-            </label>
-        `;
-        panel.appendChild(moveBtnCheckboxDiv);
-
-        // Charger l'état sauvegardé du mode modérateur
-        let moderatorMode = localStorage.getItem('moderatorModeVillageCX') === '1';
-        moveBtnCheckboxDiv.querySelector('#move-blacklist-btn-checkbox').checked = moderatorMode;
-
-        // Appliquer la position du bouton selon le mode modérateur (une seule fois et de façon fiable)
-        const blBtn = document.getElementById('blacklist-manage-btn');
-        if (blBtn) {
-            // On stocke la position attendue dans le dataset pour éviter tout recalcul/décalage multiple
-            if (moderatorMode) {
-                if (blBtn.dataset.moderatorMoved !== "true" || blBtn.style.left !== "40px") {
-                    blBtn.style.left = "40px";
-                    blBtn.dataset.moderatorMoved = "true";
-                }
-            } else {
-                if (blBtn.dataset.moderatorMoved !== "false" || blBtn.style.left !== "10px") {
-                    blBtn.style.left = "10px";
-                    blBtn.dataset.moderatorMoved = "false";
-                }
-            }
-        }
-
-        moveBtnCheckboxDiv.querySelector('#move-blacklist-btn-checkbox').onchange = (e) => {
-            moderatorMode = e.target.checked;
-            localStorage.setItem('moderatorModeVillageCX', moderatorMode ? '1' : '0');
-            const btn = document.getElementById('blacklist-manage-btn');
-            if (btn) {
-                if (moderatorMode) {
-                    btn.style.left = "40px";
-                    btn.dataset.moderatorMoved = "true";
-                } else {
-                    btn.style.left = "10px";
-                    btn.dataset.moderatorMoved = "false";
-                }
-            }
-        };
+        section.appendChild(disableConfirmationLabel);
 
         // --- Ajout de la case à cocher pour changer l'icône du bouton blacklist ---
         const iconCheckboxDiv = document.createElement('div');
@@ -536,7 +596,7 @@
                 <span>Icône blacklist : ❌ au lieu de 🚫</span>
             </label>
         `;
-        panel.appendChild(iconCheckboxDiv);
+        section.appendChild(iconCheckboxDiv);
 
         // Récupérer l'état de l'icône depuis localStorage
         let useCrossIcon = localStorage.getItem('blacklistUseCrossIcon') === '1';
@@ -547,6 +607,30 @@
             useCrossIcon = e.target.checked;
             localStorage.setItem('blacklistUseCrossIcon', useCrossIcon ? '1' : '0');
             refreshAll(true);
+        };
+
+        // Après le checkbox pour l'icône, ajouter le slider
+        const sliderDiv = document.createElement('div');
+        sliderDiv.style.marginTop = '10px';
+        const savedLeft = parseInt(localStorage.getItem('blacklistBtnLeftVillageCX') || '10', 10);
+        sliderDiv.innerHTML = `
+            <label style="color:white;display:flex;align-items:center;gap:8px;">
+                <span>Position du bouton :</span>
+                <input type="range" id="blacklist-btn-slider" min="0" max="500" value="${savedLeft}" style="flex:1;">
+                <span id="blacklist-btn-slider-value">${savedLeft}px</span>
+            </label>
+        `;
+        section.appendChild(sliderDiv);
+
+        // Gestion du slider
+        const slider = sliderDiv.querySelector('#blacklist-btn-slider');
+        const sliderValue = sliderDiv.querySelector('#blacklist-btn-slider-value');
+        slider.oninput = (e) => {
+            const val = parseInt(e.target.value, 10);
+            sliderValue.textContent = val + "px";
+            const btn = document.getElementById('options-btn');
+            if (btn) btn.style.left = val + "px";
+            localStorage.setItem('blacklistBtnLeftVillageCX', val);
         };
 
         addForm.querySelector('#blacklist-add-btn').onclick = () => {
@@ -567,122 +651,60 @@
                 }
             }
         });
-        panel.querySelector('#disable-confirmation').onchange = (e) => {
+        section.querySelector('#disable-confirmation').onchange = (e) => {
             disableConfirmation = e.target.checked;
             saveConfirmationSetting();
         };
-        panel.querySelector('#blacklist-export-btn').onclick = exportBlacklist;
-        panel.querySelector('#blacklist-import-btn').onclick = importBlacklist;
+        section.querySelector('#blacklist-export-btn').onclick = exportBlacklist;
+        section.querySelector('#blacklist-import-btn').onclick = importBlacklist;
     }
-    function updateBlacklistPanel() {
-        const panel = document.getElementById('blacklist-panel');
-        if (panel) updateBlacklistPanelContent(panel);
-    }
-    function exportBlacklist() {
-        try {
-            const dataStr = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(blacklist, null, 2))}`;
-            const downloadAnchorNode = document.createElement('a');
-            downloadAnchorNode.setAttribute("href", dataStr);
-            downloadAnchorNode.setAttribute("download", "village-cx-blacklist.json");
-            document.body.appendChild(downloadAnchorNode);
-            downloadAnchorNode.click();
-            downloadAnchorNode.remove();
-            showNotification("Blacklist exportée avec succès!");
-        } catch (e) {
-            showNotification("Erreur lors de l'exportation : " + e.message, true);
-        }
-    }
-    function importBlacklist() {
-        try {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = '.json';
-            input.onchange = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    try {
-                        const importedList = JSON.parse(event.target.result);
-                        if (Array.isArray(importedList)) {
-                            const validNames = importedList
-                                .map(name => validateAndSanitizeUsername(name))
-                                .filter(name => name && !blacklist.includes(name));
+    function updateFeaturesSection(section) {
+        const container = document.createElement('div');
+        container.style.display = 'flex';
+        container.style.flexDirection = 'column';
+        container.style.gap = '10px';
 
-                            if (validNames.length > 0) {
-                                if (confirm(`Voulez-vous ajouter ${validNames.length} noms valides à votre blacklist actuelle ?`)) {
-                                    blacklist = [...blacklist, ...validNames];
-                                    saveBlacklist();
-                                    refreshAll();
-                                    showNotification(`Ajouté ${validNames.length} noms à la blacklist.`);
-                                }
-                            } else {
-                                showNotification("Aucun nom valide à ajouter ou tous les noms sont déjà dans la blacklist.");
-                            }
-                        } else {
-                            showNotification("Format de fichier invalide. Veuillez fournir un tableau JSON.", true);
-                        }
-                    } catch (e) {
-                        showNotification("Erreur lors de l'importation du fichier: " + e.message, true);
-                    }
-                };
-                reader.readAsText(file);
-            };
-            input.click();
-        } catch (e) {
-            showNotification("Erreur lors de l'importation : " + e.message, true);
-        }
-    }
+        // Silent Typing Toggle
+        const silentTypingBtn = document.createElement('button');
+        silentTypingBtn.style.padding = '10px';
+        silentTypingBtn.style.background = silentTypingEnabled ? '#555' : '#222';
+        silentTypingBtn.style.color = 'white';
+        silentTypingBtn.style.border = '1px solid #666';
+        silentTypingBtn.style.borderRadius = '6px';
+        silentTypingBtn.style.cursor = 'pointer';
+        silentTypingBtn.style.width = '100%';
+        silentTypingBtn.textContent = silentTypingEnabled ? '🔇 Silent Typing Activé' : '🔊 Silent Typing Désactivé';
+        silentTypingBtn.onclick = toggleSilentTyping;
+        container.appendChild(silentTypingBtn);
 
-    // --- Panneau de gestion Favoris ---
-    function toggleHighlightListPanel() {
-        const panel = document.getElementById('highlight-panel');
-        if (panel) {
-            panel.remove();
-        } else {
-            showHighlightListPanel();
-        }
-    }
-    function showHighlightListPanel() {
-        const btn = document.getElementById('highlight-manage-btn');
-        const rect = btn.getBoundingClientRect();
-        const panel = document.createElement('div');
-        panel.id = 'highlight-panel';
-        panel.style.position = 'fixed';
-        panel.style.top = `${rect.bottom + window.scrollY}px`; // Décalage augmenté à 40px
-        panel.style.right = `${window.innerWidth - rect.right + window.scrollX}px`;
-        panel.style.background = 'black';
-        panel.style.color = 'white';
-        panel.style.padding = '16px';
-        panel.style.borderRadius = '8px';
-        panel.style.zIndex = '10001';
-        panel.style.maxHeight = '300px';
-        panel.style.overflowY = 'auto';
-        panel.classList.add('oled-panel');
-        updateHighlightListPanelContent(panel);
-        document.body.appendChild(panel);
-    }
-    function updateHighlightListPanelContent(panel) {
-        setSafeInnerHTML(panel, '<strong>Membres en évidence :</strong><br/>');
+        section.appendChild(container);
+
+        // Section Favoris
+        const favorisSection = document.createElement('div');
+        favorisSection.style.marginTop = '20px';
+        setSafeInnerHTML(favorisSection, '<h4 style="margin: 0 0 10px 0; color: #FFD700;">Liste des Favoris</h4>');
+
         if (highlightList.length === 0) {
-            panel.innerHTML += '<p><em>Aucun membre en évidence.</em></p>';
+            favorisSection.innerHTML += '<p><em>Aucun favori.</em></p>';
         } else {
             const list = document.createElement('div');
             list.style.marginTop = '10px';
-            highlightList.forEach(name => {
+            highlightList.slice().sort().forEach(name => {
                 const row = document.createElement('div');
                 row.style.display = 'flex';
                 row.style.justifyContent = 'space-between';
                 row.style.alignItems = 'center';
-                row.style.padding = '10px';
+                row.style.padding = '8px 10px';
                 row.style.margin = '5px 0';
                 row.style.backgroundColor = '#1a1a1a';
                 row.style.borderRadius = '8px';
                 row.style.borderLeft = '3px solid #FFD700';
+                
                 const span = document.createElement('span');
                 span.textContent = name;
                 span.style.fontSize = '14px';
                 span.style.color = '#ffffff';
+                
                 const del = document.createElement('button');
                 del.innerHTML = '❌';
                 del.style.background = 'none';
@@ -691,99 +713,40 @@
                 del.style.cursor = 'pointer';
                 del.style.fontSize = '16px';
                 del.onclick = () => removeFromHighlightList(name);
+                
                 row.appendChild(span);
                 row.appendChild(del);
                 list.appendChild(row);
             });
-            panel.appendChild(list);
-        }
-    }
-    function updateHighlightListPanel() {
-        const panel = document.getElementById('highlight-panel');
-        if (panel) updateHighlightListPanelContent(panel);
-    }
-
-    // --- Silent Typing Feature (WebSocket only) ---
-    let silentTypingEnabled = localStorage.getItem('silentTypingVillageCX') === '1';
-    let wsHookStopper = null;
-
-    function toggleSilentTyping() {
-        silentTypingEnabled = !silentTypingEnabled;
-        localStorage.setItem('silentTypingVillageCX', silentTypingEnabled ? '1' : '0');
-        updateSilentTypingButton();
-        if (silentTypingEnabled) {
-            enableSilentTypingWebSocket();
-            showNotification("Mode frappe silencieuse activé");
-        } else {
-            disableSilentTypingWebSocket();
-            showNotification("Mode frappe silencieuse désactivé");
-        }
-    }
-
-    function createSilentTypingButton() {
-        if (document.getElementById('silent-typing-btn')) return;
-        const btn = document.createElement('button');
-        btn.textContent = silentTypingEnabled ? '🔇 Silent Typing Activé' : '🔊 Silent Typing Désactivé';
-        btn.id = 'silent-typing-btn';
-        btn.style.position = 'fixed';
-        btn.style.top = '5px';
-        btn.style.right = '250px';
-        btn.style.zIndex = '10000';
-        btn.style.fontSize = '14px';
-        btn.style.padding = '6px 12px';
-        btn.style.background = silentTypingEnabled ? '#555' : '#222';
-        btn.style.color = 'white';
-        btn.style.border = '1px solid #555';
-        btn.style.borderRadius = '6px';
-        btn.style.cursor = 'pointer';
-        btn.onclick = toggleSilentTyping;
-        document.body.appendChild(btn);
-    }
-
-    function updateSilentTypingButton() {
-        const btn = document.getElementById('silent-typing-btn');
-        if (btn) {
-            btn.textContent = silentTypingEnabled ? '🔇 Silent Typing Activé' : '🔊 Silent Typing Désactivé';
-            btn.style.background = silentTypingEnabled ? '#555' : '#222';
-        }
-    }
-
-    // --- WebSocket hook pour silent typing ---
-    function enableSilentTypingWebSocket() {
-        if (wsHookStopper) return; // déjà hooké
-
-        function hookMethod(obj, method, hookFn) {
-            const realMethod = obj[method];
-            function stopHook() {
-                obj[method] = realMethod;
-            }
-            function hook(...args) {
-                return hookFn({ stopHook, method: realMethod }, this, args);
-            }
-            obj[method] = hook;
-            return stopHook;
+            favorisSection.appendChild(list);
         }
 
-        wsHookStopper = hookMethod(WebSocket.prototype, "send", (ctx, obj, args) => {
-            const msg = args[0];
-            try {
-                const data = JSON.parse(msg);
-                if (data && data.type === "typing") {
-                    return; // bloque l'envoi du message de frappe
-                }
-            } catch (e) {}
-            return ctx.method.apply(obj, args);
-        });
+        section.appendChild(favorisSection);
     }
 
-    function disableSilentTypingWebSocket() {
-        if (wsHookStopper) {
-            wsHookStopper();
-            wsHookStopper = null;
-        }
+    function updateAppearanceSection(section) {
+        const container = document.createElement('div');
+        container.style.display = 'flex';
+        container.style.flexDirection = 'column';
+        container.style.gap = '10px';
+
+        // OLED Theme Toggle
+        const oledBtn = document.createElement('button');
+        oledBtn.style.padding = '10px';
+        oledBtn.style.background = document.body.classList.contains('oled-theme-enabled') ? '#555' : '#222';
+        oledBtn.style.color = 'white';
+        oledBtn.style.border = '1px solid #666';
+        oledBtn.style.borderRadius = '6px';
+        oledBtn.style.cursor = 'pointer';
+        oledBtn.style.width = '100%';
+        oledBtn.textContent = document.body.classList.contains('oled-theme-enabled') ? '🖤 OLED Activé' : '🤍 OLED Désactivé';
+        oledBtn.onclick = toggleOLEDTheme;
+        container.appendChild(oledBtn);
+
+        section.appendChild(container);
     }
 
-    // --- Intégration dans l'initialisation ---
+    // --- Modification de initialize() ---
     function initialize() {
         // OLED mode: restore state from localStorage
         if (localStorage.getItem('oledThemeVillageCX') === '1') {
@@ -831,9 +794,9 @@
                 document.head.appendChild(menuStyle);
             }
         }
+        updateDOMCache();
         refreshAll();
         createManageButton();
-        createSilentTypingButton();
         startObserver();
         if (silentTypingEnabled) enableSilentTypingWebSocket();
     }
@@ -1102,53 +1065,6 @@ function updateBlacklistPanelContent(panel) {
     `;
     panel.appendChild(disableConfirmationLabel);
 
-    // --- Ajout de la case à cocher pour déplacer le bouton ---
-    const moveBtnCheckboxDiv = document.createElement('div');
-    moveBtnCheckboxDiv.style.marginTop = '10px';
-    moveBtnCheckboxDiv.innerHTML = `
-        <label style="display: flex; align-items: center; gap: 5px; color: white;">
-            <input type="checkbox" id="move-blacklist-btn-checkbox">
-            <span>Mode modérateur</span>
-        </label>
-    `;
-    panel.appendChild(moveBtnCheckboxDiv);
-
-    // Charger l'état sauvegardé du mode modérateur
-    let moderatorMode = localStorage.getItem('moderatorModeVillageCX') === '1';
-    moveBtnCheckboxDiv.querySelector('#move-blacklist-btn-checkbox').checked = moderatorMode;
-
-    // Appliquer la position du bouton selon le mode modérateur (une seule fois et de façon fiable)
-    const blBtn = document.getElementById('blacklist-manage-btn');
-    if (blBtn) {
-        // On stocke la position attendue dans le dataset pour éviter tout recalcul/décalage multiple
-        if (moderatorMode) {
-            if (blBtn.dataset.moderatorMoved !== "true" || blBtn.style.left !== "40px") {
-                blBtn.style.left = "40px";
-                blBtn.dataset.moderatorMoved = "true";
-            }
-        } else {
-            if (blBtn.dataset.moderatorMoved !== "false" || blBtn.style.left !== "10px") {
-                blBtn.style.left = "10px";
-                blBtn.dataset.moderatorMoved = "false";
-            }
-        }
-    }
-
-    moveBtnCheckboxDiv.querySelector('#move-blacklist-btn-checkbox').onchange = (e) => {
-        moderatorMode = e.target.checked;
-        localStorage.setItem('moderatorModeVillageCX', moderatorMode ? '1' : '0');
-        const btn = document.getElementById('blacklist-manage-btn');
-        if (btn) {
-            if (moderatorMode) {
-                btn.style.left = "40px";
-                btn.dataset.moderatorMoved = "true";
-            } else {
-                btn.style.left = "10px";
-                btn.dataset.moderatorMoved = "false";
-            }
-        }
-    };
-
     // --- Ajout de la case à cocher pour changer l'icône du bouton blacklist ---
     const iconCheckboxDiv = document.createElement('div');
     iconCheckboxDiv.style.marginTop = '10px';
@@ -1169,6 +1085,30 @@ function updateBlacklistPanelContent(panel) {
         useCrossIcon = e.target.checked;
         localStorage.setItem('blacklistUseCrossIcon', useCrossIcon ? '1' : '0');
         refreshAll(true);
+    };
+
+    // Après le checkbox pour l'icône, ajouter le slider
+    const sliderDiv = document.createElement('div');
+    sliderDiv.style.marginTop = '10px';
+    const savedLeft = parseInt(localStorage.getItem('blacklistBtnLeftVillageCX') || '10', 10);
+    sliderDiv.innerHTML = `
+        <label style="color:white;display:flex;align-items:center;gap:8px;">
+            <span>Position du bouton :</span>
+            <input type="range" id="blacklist-btn-slider" min="0" max="500" value="${savedLeft}" style="flex:1;">
+            <span id="blacklist-btn-slider-value">${savedLeft}px</span>
+        </label>
+    `;
+    panel.appendChild(sliderDiv);
+
+    // Gestion du slider
+    const slider = sliderDiv.querySelector('#blacklist-btn-slider');
+    const sliderValue = sliderDiv.querySelector('#blacklist-btn-slider-value');
+    slider.oninput = (e) => {
+        const val = parseInt(e.target.value, 10);
+        sliderValue.textContent = val + "px";
+        const btn = document.getElementById('options-btn');
+        if (btn) btn.style.left = val + "px";
+        localStorage.setItem('blacklistBtnLeftVillageCX', val);
     };
 
     addForm.querySelector('#blacklist-add-btn').onclick = () => {
@@ -1294,4 +1234,64 @@ function validateAndSanitizeUsername(input) {
     }
 
     return input.toLowerCase(); // Retourne en minuscules pour cohérence
+}
+
+// --- Stockage Silent Typing ---
+let silentTypingEnabled = localStorage.getItem('silentTypingEnabled') === 'true';
+    
+function toggleSilentTyping() {
+    silentTypingEnabled = !silentTypingEnabled;
+    localStorage.setItem('silentTypingEnabled', silentTypingEnabled);
+    if (silentTypingEnabled) {
+        enableSilentTypingWebSocket();
+    }
+    refreshAll(true);
+}
+
+function enableSilentTypingWebSocket() {
+    const ws = new WebSocket('wss://village.cx/ws');
+    ws.addEventListener('message', (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'typing') {
+            // On bloque l'envoi du "is typing"
+            event.stopImmediatePropagation();
+        }
+    });
+}
+
+// --- Export/Import Blacklist ---
+function exportBlacklist() {
+    const data = JSON.stringify(blacklist);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'blacklist.json';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function importBlacklist() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const importedData = JSON.parse(event.target.result);
+                if (Array.isArray(importedData)) {
+                    blacklist = importedData.map(name => name.toLowerCase());
+                    saveBlacklist();
+                    refreshAll(true);
+                    showNotification('Blacklist importée avec succès');
+                }
+            } catch (err) {
+                showNotification('Erreur lors de l\'import', true);
+            }
+        };
+        reader.readAsText(file);
+    };
+    input.click();
 }
