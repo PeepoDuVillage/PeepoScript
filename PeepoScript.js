@@ -4,7 +4,7 @@
 // @version      3.1
 // @description  Ajout d'un mode clair pour le bouton d'options.
 // @icon         https://village.cx/favicon.ico
-// @author       Peepo (Corrigé par Gemini)
+// @author       Peepo
 // @match        https://village.cx/*
 // @updateURL    https://raw.githubusercontent.com/PeepoDuVillage/PeepoScript/master/PeepoScript.js
 // @downloadURL  https://raw.githubusercontent.com/PeepoDuVillage/PeepoScript/master/PeepoScript.js
@@ -14,7 +14,7 @@
 (function () {
     'use strict';
 
-    // --- DOM Cache & Elements ---
+    // --- DOM Cache et d'autres éléments---
     const domCache = {
         messageSelectors: '.message',
         pseudoSelectors: '.message-user span.font-medium',
